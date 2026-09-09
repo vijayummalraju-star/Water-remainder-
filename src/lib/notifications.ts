@@ -93,6 +93,38 @@ export async function requestNotificationPermission(): Promise<boolean> {
   }
 }
 
+/** Schedule a one-off notification shortly after pressing the test button. */
+export async function sendTestReminder(
+  settings: Pick<Settings, 'soundEnabled' | 'vibrationEnabled'>,
+): Promise<boolean> {
+  const granted = await requestNotificationPermission();
+  if (!granted) return false;
+
+  try {
+    await ensureAndroidChannel(settings);
+    const channelId = getReminderChannelId(settings);
+    const when = new Date(Date.now() + 5000);
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: 'Test reminder 💧',
+        body: 'Your Aqua Reminder notifications are working.',
+        sound: settings.soundEnabled ? 'default' : false,
+        vibrate: settings.vibrationEnabled ? [0, 240, 120, 240] : undefined,
+        ...(Platform.OS === 'android' ? { channelId } : {}),
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: when,
+        ...(Platform.OS === 'android' ? { channelId } : {}),
+      },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Returns reminder instants strictly after `from`.
  *
@@ -170,10 +202,6 @@ function normalizeDayMinutes(value: number): number {
   return ((value % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
 }
 
-/**
- * Kept as a public helper for UI/tests. Wrapped overnight minutes are returned
- * as normal clock minutes, preserving the existing API contract.
- */
 export function resolveTimesOfDay(settings: Settings): number[] {
   return resolveSchedule(settings).map((slot) => slot.minutes % MINUTES_PER_DAY);
 }
@@ -202,10 +230,7 @@ export async function cancelAllReminders(): Promise<void> {
   }
 }
 
-export async function syncReminders(
-  settings: Settings,
-  goalReachedToday: boolean,
-): Promise<Date[]> {
+export async function syncReminders(settings: Settings, goalReachedToday: boolean): Promise<Date[]> {
   vibrationEnabled = settings.vibrationEnabled;
   soundEnabled = settings.soundEnabled;
 
@@ -217,8 +242,6 @@ export async function syncReminders(
     const now = new Date();
     let from = now;
 
-    // Once today's goal is reached, stop today's reminders but keep the next
-    // day's schedule alive so it resumes even if the app stays closed overnight.
     if (goalReachedToday) {
       from = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
       from = new Date(from.getTime() - 1);
