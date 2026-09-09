@@ -13,7 +13,7 @@ import { PrimaryButton } from '../components/PrimaryButton';
 import { PressableScale } from '../components/PressableScale';
 import { TimePickerModal } from '../components/TimePickerModal';
 import { formatClock, timestampToClock } from '../lib/dates';
-import { computeReminderTimes, describeSchedule, nextReminderAt } from '../lib/notifications';
+import { computeReminderTimes, describeSchedule, nextReminderAt, requestNotificationPermission } from '../lib/notifications';
 import { makeCustomReminder } from '../state/defaults';
 import { isGoalReachedToday } from '../lib/hydration';
 import { formatVolumeWithUnit } from '../lib/units';
@@ -36,8 +36,17 @@ export function RemindersScreen(_props: Props) {
   const upcoming = useMemo(() => computeReminderTimes(settings, new Date(), 5), [settings]);
   const customCount = settings.customReminders.filter((r) => r.enabled).length;
 
-  const toggleEnabled = (v: boolean) => {
-    updateSettings({ remindersEnabled: v });
+  const toggleEnabled = async (v: boolean) => {
+    if (!v) {
+      updateSettings({ remindersEnabled: false });
+      return;
+    }
+
+    // Android 13+ requires explicit notification permission. Request it before
+    // enabling the feature so the UI does not claim reminders are active when
+    // the OS has blocked notifications.
+    const granted = await requestNotificationPermission();
+    if (granted) updateSettings({ remindersEnabled: true });
   };
 
   const addCustom = () => {
