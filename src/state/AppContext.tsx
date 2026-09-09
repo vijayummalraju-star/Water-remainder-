@@ -49,24 +49,19 @@ interface AppState {
 }
 
 export interface AppContextValue extends AppState {
-  /** False until the persisted snapshot has been read from disk. */
   hydrated: boolean;
   celebration: Celebration | null;
   dismissCelebration: () => void;
-
   addEntry: (input: { amountMl: number; timestamp?: number; type?: BeverageType }) => void;
   updateEntry: (id: string, patch: Partial<Pick<WaterEntry, 'amountMl' | 'timestamp' | 'type'>>) => void;
   deleteEntry: (id: string) => void;
   clearToday: () => void;
-
   updateSettings: (patch: Partial<Settings>) => void;
   finishOnboarding: () => void;
   loadDemoData: () => void;
   resetTodayData: () => void;
   deleteAllData: () => void;
   exportData: () => Promise<string>;
-
-  /** Number of unlocked achievements. */
   unlockedCount: number;
 }
 
@@ -91,7 +86,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const achievementsRef = useRef(achievements);
   achievementsRef.current = achievements;
 
-  /** Load persisted snapshot once on cold start. */
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -110,7 +104,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  /** Persist on every meaningful change (offline-first, single key). */
   useEffect(() => {
     if (!hydrated || !readyRef.current) return;
     const snapshot: AppSnapshot = {
@@ -122,7 +115,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     void saveSnapshot(snapshot);
   }, [hydrated, settings, entries, achievements]);
 
-  /** Keep the notification behaviour in sync with the sound preference. */
   useEffect(() => {
     if (!hydrated) return;
     updateHandlerSound(settings.soundEnabled);
@@ -133,7 +125,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** Re-plan reminders whenever schedule inputs or today's progress change. */
   const goalReached = useMemo(
     () => isGoalReachedToday(entries, settings),
     [entries, settings],
@@ -157,10 +148,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const dismissCelebration = useCallback(() => setCelebration(null), []);
 
-  /**
-   * Single mutation path: derives achievements + goal celebration so the UI
-   * never has to keep them in sync manually.
-   */
   const commit = useCallback(
     (nextEntries: WaterEntry[], nextSettings: Settings, previousTotal: number) => {
       setEntries(nextEntries);
@@ -267,7 +254,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const now = Date.now();
     setEntries(demo);
     setAchievements({});
-    // Evaluate immediately so badges populate right away.
     const unlocked = evaluateAchievements(demo, current, {});
     if (unlocked.length > 0) {
       const map: AchievementMap = {};
@@ -277,8 +263,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const deleteAllData = useCallback(() => {
+    // Reset in-memory state as well as storage. Previously clearSnapshot() was
+    // immediately followed by the persistence effect, which wrote the old
+    // settings back and made "Delete all data" appear to do nothing on reload.
+    setSettings({ ...DEFAULT_SETTINGS });
     setEntries([]);
     setAchievements({});
+    setCelebration(null);
     void clearSnapshot();
   }, []);
 
