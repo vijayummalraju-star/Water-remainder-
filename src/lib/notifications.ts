@@ -6,9 +6,6 @@ import { MINUTES_PER_DAY, formatClock } from './dates';
 export const REMINDER_CHANNEL_ID = 'water-reminders';
 export const MAX_SCHEDULED = 12;
 
-/**
- * Human-friendly reminder copy. Kept short so it reads well on a lock screen.
- */
 export const REMINDER_MESSAGES: { title: string; body: string }[] = [
   { title: 'Time to hydrate 💧', body: 'A quick glass of water keeps your energy up.' },
   { title: 'Hydration check', body: 'Your body is asking for water. Take a few sips.' },
@@ -21,10 +18,6 @@ let soundEnabled = true;
 let vibrationEnabled = true;
 let handlerConfigured = false;
 
-/**
- * Called once at startup and again whenever the sound preference changes so
- * incoming notifications respect the user's choice.
- */
 export function configureNotificationHandler(opts: { sound: boolean }) {
   soundEnabled = opts.sound;
   handlerConfigured = true;
@@ -63,7 +56,6 @@ export async function ensureAndroidChannel(): Promise<void> {
   }
 }
 
-/** Returns true when permission has already been granted. */
 export async function hasNotificationPermission(): Promise<boolean> {
   try {
     const settings = await Notifications.getPermissionsAsync();
@@ -85,24 +77,35 @@ export async function requestNotificationPermission(): Promise<boolean> {
 }
 
 /**
- * Pure planner: resolves the next `count` reminder instants strictly after
- * `from`, honouring either the interval window or the custom schedule.
- * Mirrors exactly what gets scheduled, so the UI can preview "next reminder".
+ * Returns reminder instants strictly after `from`.
+ *
+ * The interval window may cross midnight. We keep the day offset while building
+ * the schedule instead of sorting wrapped minutes (which previously caused an
+ * overnight 00:00 slot to be scheduled before the evening slot on the same day).
  */
 export function computeReminderTimes(settings: Settings, from: Date, count: number): Date[] {
   if (!settings.remindersEnabled || count <= 0) return [];
 
-  const times = resolveTimesOfDay(settings);
-  if (times.length === 0) return [];
+  const schedule = resolveSchedule(settings);
+  if (schedule.length === 0) return [];
 
   const base = new Date(from);
   base.setSeconds(0, 0);
   const out: Date[] = [];
 
-  for (let dayOffset = 0; dayOffset <= 7 && out.length < count; dayOffset++) {
-    const day = new Date(base.getFullYear(), base.getMonth(), base.getDate() + dayOffset, 0, 0, 0, 0);
-    for (const minutes of times) {
-      const when = new Date(day.getTime() + minutes * 60000);
+  for (let dayOffset = 0; dayOffset <= 8 && out.length < count; dayOffset++) {
+    const dayStart = new Date(
+      base.getFullYear(),
+      base.getMonth(),
+      base.getDate() + dayOffset,
+      0,
+      0,
+      0,
+      0,
+    );
+
+    for (const slot of schedule) {
+      const when = new Date(dayStart.getTime() + slot.minutes * 60000);
       if (when.getTime() > from.getTime()) {
         out.push(when);
         if (out.length >= count) break;
@@ -110,31 +113,52 @@ export function computeReminderTimes(settings: Settings, from: Date, count: numb
     }
   }
 
-  out.sort((a, b) => a.getTime() - b.getTime());
   return out.slice(0, count);
 }
 
-/** Sorted, de-duplicated list of allowed minutes-after-midnight. */
-export function resolveTimesOfDay(settings: Settings): number[] {
+type ReminderSlot = { minutes: number };
+
+/** Sorted, de-duplicated reminder minutes with their day offset preserved. */
+function resolveSchedule(settings: Settings): ReminderSlot[] {
   if (settings.useCustomSchedule) {
     const custom = settings.customReminders
       .filter((r) => r.enabled)
-      .map((r) => r.time)
-      .sort((a, b) => a - b);
-    if (custom.length > 0) return Array.from(new Set(custom));
+      .map((r) => ({ minutes: r.time }))
+      .sort((a, b) => a.minutes - b.minutes);
+    if (custom.length > 0) return dedupeSlots(custom);
   }
 
-  const start = ((settings.reminderStart % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
+  const start = normalizeDayMinutes(settings.reminderStart);
+  const rawEnd = normalizeDayMinutes(settings.reminderEnd);
   const interval = Math.max(5, Math.round(settings.reminderIntervalMin));
-  let end = ((settings.reminderEnd % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
-  // A window that ends at or before its start is treated as crossing midnight.
-  if (end <= start) end += MINUTES_PER_DAY;
+  const end = rawEnd <= start ? rawEnd + MINUTES_PER_DAY : rawEnd;
+  const slots: ReminderSlot[] = [];
 
-  const times: number[] = [];
   for (let t = start; t <= end; t += interval) {
-    times.push(t % MINUTES_PER_DAY);
+    slots.push({ minutes: t });
   }
-  return Array.from(new Set(times)).sort((a, b) => a - b);
+  return dedupeSlots(slots);
+}
+
+function dedupeSlots(slots: ReminderSlot[]): ReminderSlot[] {
+  const seen = new Set<number>();
+  return slots.filter((slot) => {
+    if (seen.has(slot.minutes)) return false;
+    seen.add(slot.minutes);
+    return true;
+  });
+}
+
+function normalizeDayMinutes(value: number): number {
+  return ((value % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
+}
+
+/**
+ * Kept as a public helper for UI/tests. Wrapped overnight minutes are returned
+ * as normal clock minutes, preserving the existing API contract.
+ */
+export function resolveTimesOfDay(settings: Settings): number[] {
+  return resolveSchedule(settings).map((slot) => slot.minutes % MINUTES_PER_DAY);
 }
 
 export function nextReminderAt(settings: Settings, from: Date = new Date()): Date | null {
@@ -161,13 +185,6 @@ export async function cancelAllReminders(): Promise<void> {
   }
 }
 
-/**
- * Syncs the pending notification queue with current settings.
- *
- * - Cancels everything first (idempotent, avoids duplicate alerts).
- * - Stops scheduling once today's goal is reached.
- * - Skips when notifications are disabled.
- */
 export async function syncReminders(
   settings: Settings,
   goalReachedToday: boolean,
