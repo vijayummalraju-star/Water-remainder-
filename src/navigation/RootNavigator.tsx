@@ -4,6 +4,7 @@ import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { useApp } from '../state/AppContext';
 import { HomeScreen } from '../screens/HomeScreen';
@@ -40,6 +41,9 @@ const TAB_ICONS: Record<keyof TabParamList, { active: string; inactive: string }
 
 function Tabs() {
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
+  const bottomInset = Math.max(insets.bottom, 0);
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -50,9 +54,9 @@ function Tabs() {
           backgroundColor: theme.colors.card,
           borderTopColor: theme.colors.border,
           borderTopWidth: 1,
-          height: 70,
-          paddingBottom: 12,
-          paddingTop: 7,
+          height: 62 + bottomInset,
+          paddingBottom: 8 + bottomInset,
+          paddingTop: 6,
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
         tabBarIcon: ({ color, focused, size }) => {
