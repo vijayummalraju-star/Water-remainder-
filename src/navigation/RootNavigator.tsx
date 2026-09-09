@@ -50,9 +50,9 @@ function Tabs() {
           backgroundColor: theme.colors.card,
           borderTopColor: theme.colors.border,
           borderTopWidth: 1,
-          height: 62,
-          paddingBottom: 8,
-          paddingTop: 6,
+          height: 70,
+          paddingBottom: 12,
+          paddingTop: 7,
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
         tabBarIcon: ({ color, focused, size }) => {
