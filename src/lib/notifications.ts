@@ -6,6 +6,13 @@ import { MINUTES_PER_DAY, formatClock } from './dates';
 export const REMINDER_CHANNEL_ID = 'water-reminders';
 export const MAX_SCHEDULED = 12;
 
+const CHANNEL_IDS = {
+  soundVibration: 'water-reminders-sound-vibration',
+  soundOnly: 'water-reminders-sound-only',
+  vibrationOnly: 'water-reminders-vibration-only',
+  silent: 'water-reminders-silent',
+} as const;
+
 export const REMINDER_MESSAGES: { title: string; body: string }[] = [
   { title: 'Time to hydrate 💧', body: 'A quick glass of water keeps your energy up.' },
   { title: 'Hydration check', body: 'Your body is asking for water. Take a few sips.' },
@@ -40,15 +47,25 @@ export function updateHandlerSound(sound: boolean) {
   configureNotificationHandler({ sound });
 }
 
-export async function ensureAndroidChannel(): Promise<void> {
+function getReminderChannelId(settings: Pick<Settings, 'soundEnabled' | 'vibrationEnabled'>): string {
+  if (settings.soundEnabled && settings.vibrationEnabled) return CHANNEL_IDS.soundVibration;
+  if (settings.soundEnabled) return CHANNEL_IDS.soundOnly;
+  if (settings.vibrationEnabled) return CHANNEL_IDS.vibrationOnly;
+  return CHANNEL_IDS.silent;
+}
+
+export async function ensureAndroidChannel(settings?: Pick<Settings, 'soundEnabled' | 'vibrationEnabled'>): Promise<void> {
   if (Platform.OS !== 'android') return;
+  const sound = settings?.soundEnabled ?? soundEnabled;
+  const vibration = settings?.vibrationEnabled ?? vibrationEnabled;
+  const channelId = getReminderChannelId({ soundEnabled: sound, vibrationEnabled: vibration });
   try {
-    await Notifications.setNotificationChannelAsync(REMINDER_CHANNEL_ID, {
+    await Notifications.setNotificationChannelAsync(channelId, {
       name: 'Water reminders',
       importance: Notifications.AndroidImportance.HIGH,
-      vibrationPattern: vibrationEnabled ? [0, 240, 120, 240] : [0],
+      vibrationPattern: vibration ? [0, 240, 120, 240] : [0],
       lightColor: '#4FB0FF',
-      sound: soundEnabled ? 'default' : null,
+      sound: sound ? 'default' : null,
       bypassDnd: false,
     });
   } catch {
@@ -194,11 +211,21 @@ export async function syncReminders(
 
   try {
     await cancelAllReminders();
-    if (!settings.remindersEnabled || goalReachedToday) return [];
+    if (!settings.remindersEnabled) return [];
 
-    await ensureAndroidChannel();
+    await ensureAndroidChannel(settings);
     const now = new Date();
-    const upcoming = computeReminderTimes(settings, now, MAX_SCHEDULED);
+    let from = now;
+
+    // Once today's goal is reached, stop today's reminders but keep the next
+    // day's schedule alive so it resumes even if the app stays closed overnight.
+    if (goalReachedToday) {
+      from = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
+      from = new Date(from.getTime() - 1);
+    }
+
+    const upcoming = computeReminderTimes(settings, from, MAX_SCHEDULED);
+    const channelId = getReminderChannelId(settings);
 
     for (let i = 0; i < upcoming.length; i++) {
       const when = upcoming[i];
@@ -209,12 +236,12 @@ export async function syncReminders(
           body: message.body,
           sound: settings.soundEnabled ? 'default' : false,
           vibrate: settings.vibrationEnabled ? [0, 240, 120, 240] : undefined,
-          ...(Platform.OS === 'android' ? { channelId: REMINDER_CHANNEL_ID } : {}),
+          ...(Platform.OS === 'android' ? { channelId } : {}),
         },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DATE,
           date: when,
-          ...(Platform.OS === 'android' ? { channelId: REMINDER_CHANNEL_ID } : {}),
+          ...(Platform.OS === 'android' ? { channelId } : {}),
         },
       });
     }
