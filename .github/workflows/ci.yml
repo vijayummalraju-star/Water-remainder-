@@ -34,8 +34,8 @@ jobs:
       - name: Expo config check
         run: npx expo config --type public
 
-  expo-export:
-    name: Expo production export
+  android-apk:
+    name: Build Android APK
     runs-on: ubuntu-latest
     needs: typecheck
 
@@ -52,13 +52,17 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Export production bundle
-        run: npx expo export --platform android
+      - name: Generate Android project
+        run: npx expo prebuild --platform android --non-interactive
 
-      - name: Upload Expo export
+      - name: Build release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: aqua-reminder-expo-export
-          path: dist/
+          name: aqua-reminder-android-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 7
